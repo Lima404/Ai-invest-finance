@@ -70,7 +70,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import BrandLogo from '@/components/BrandLogo.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
@@ -87,6 +87,14 @@ const modo = ref('login')
 const mostrarSenha = ref(false)
 const form = ref({ email: '', senha: '' })
 
+// Redireciona assim que a autenticacao virar verdadeira, independentemente
+// de qual caminho estabeleceu a sessao (retorno do signIn ou onAuthStateChange).
+watch(
+  () => auth.isAuthenticated,
+  (logado) => { if (logado) redirecionar() },
+  { immediate: true }
+)
+
 async function enviar () {
   if (!auth.configured) {
     toast.error('Configure o Supabase no .env antes de continuar.')
@@ -94,12 +102,9 @@ async function enviar () {
   }
   if (modo.value === 'login') {
     const r = await auth.signIn(form.value.email, form.value.senha)
-    if (r.ok) {
-      toast.success('Bem-vindo de volta!')
-      redirecionar()
-    } else {
-      toast.error(r.error)
-    }
+    // o watcher de isAuthenticated faz o redirect quando a sessao for criada
+    if (r.ok) toast.success('Bem-vindo de volta!')
+    else toast.error(r.error)
   } else {
     const r = await auth.signUp(form.value.email, form.value.senha)
     if (r.ok) {
@@ -108,7 +113,6 @@ async function enviar () {
         modo.value = 'login'
       } else {
         toast.success('Conta criada com sucesso!')
-        redirecionar()
       }
     } else {
       toast.error(r.error)
@@ -117,8 +121,8 @@ async function enviar () {
 }
 
 function redirecionar () {
-  const dest = route.query.redirect || '/'
-  router.replace(dest)
+  const dest = (typeof route.query.redirect === 'string' && route.query.redirect) || '/'
+  router.replace(dest).catch(() => {})
 }
 </script>
 

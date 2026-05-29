@@ -1,40 +1,9 @@
 import { defineStore } from 'pinia'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/stores/auth'
 import { monthKey } from '@/utils/format'
 import { autoCategoria, DEFAULT_CATEGORIES } from '@/utils/categories'
-
-const STORAGE_KEY = 'ai-invest:transactions'
-const BUDGET_KEY = 'ai-invest:budgets'
-
-function uid () {
-  return 't_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-}
-
-function readJSON (key, fallback) {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? JSON.parse(raw) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function writeJSON (key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    /* armazenamento indisponivel */
-  }
-}
-
-function load () {
-  const raw = readJSON(STORAGE_KEY, [])
-  return Array.isArray(raw) ? raw : []
-}
-
-function loadBudgets () {
-  const raw = readJSON(BUDGET_KEY, {})
-  return raw && typeof raw === 'object' ? raw : {}
-}
+import { useToast } from '@/composables/useToast'
 
 // mes de referencia para orcamento: filtro selecionado ou mes atual
 function currentMonth () {
@@ -42,26 +11,59 @@ function currentMonth () {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// tabela do Supabase conforme o tipo
+const tabela = (tipo) => (tipo === 'receita' ? 'receitas' : 'despesas')
+
+// row do banco -> objeto usado no app
+function rowToTx (row, tipo) {
+  return {
+    id: row.id,
+    data: row.data,
+    descricao: row.descricao,
+    valor: Number(row.valor),
+    tipo,
+    categoria: row.categoria,
+    origem: row.origem,
+    externalId: row.external_id || '',
+    observacao: row.observacao || '',
+    criadoEm: row.created_at
+  }
+}
+
+// objeto do app -> colunas do banco (sem id; user_id vem do auth)
+function txToRow (tx, uid) {
+  return {
+    user_id: uid,
+    data: tx.data,
+    descricao: tx.descricao || 'Transação',
+    valor: Math.abs(Number(tx.valor || 0)),
+    categoria: tx.categoria || autoCategoria(tx.descricao, tx.tipo),
+    origem: tx.origem || 'Manual',
+    observacao: tx.observacao || null,
+    external_id: tx.externalId || null
+  }
+}
+
 export const useFinanceStore = defineStore('finance', {
   state: () => ({
-    transactions: load(),
+    transactions: [],
     // metas de orcamento mensais por categoria de despesa: { [categoria]: limiteMensal }
-    budgets: loadBudgets(),
+    budgets: {},
     // mes selecionado no dashboard (yyyy-mm) ; '' = todos
-    filtroMes: ''
+    filtroMes: '',
+    loading: false,
+    loaded: false
   }),
 
   getters: {
     receitas: (s) => s.transactions.filter((t) => t.tipo === 'receita'),
     despesas: (s) => s.transactions.filter((t) => t.tipo === 'despesa'),
 
-    // lista de meses presentes nos dados (desc)
     meses: (s) => {
       const set = new Set(s.transactions.map((t) => monthKey(t.data)).filter(Boolean))
       return [...set].sort().reverse()
     },
 
-    // aplica filtro de mes
     filtradas: (s) => {
       if (!s.filtroMes) return s.transactions
       return s.transactions.filter((t) => monthKey(t.data) === s.filtroMes)
@@ -77,7 +79,6 @@ export const useFinanceStore = defineStore('finance', {
       return this.totalReceitas - this.totalDespesas
     },
 
-    // gasto por categoria (despesas do filtro)
     porCategoria () {
       const map = {}
       for (const t of this.filtradas) {
@@ -89,7 +90,6 @@ export const useFinanceStore = defineStore('finance', {
         .sort((a, b) => b.total - a.total)
     },
 
-    // serie mensal (todos os meses) -> { mes, receitas, despesas, saldo }
     serieMensal: (s) => {
       const map = {}
       for (const t of s.transactions) {
@@ -107,10 +107,8 @@ export const useFinanceStore = defineStore('finance', {
     categoriasReceita: () => DEFAULT_CATEGORIES.receita,
     categoriasDespesa: () => DEFAULT_CATEGORIES.despesa,
 
-    // mes usado como referencia para as metas (filtro ou mes atual)
     mesOrcamento: (s) => s.filtroMes || currentMonth(),
 
-    // gasto por categoria no mes de referencia das metas
     gastoMesOrcamento () {
       const mes = this.mesOrcamento
       const map = {}
@@ -122,7 +120,6 @@ export const useFinanceStore = defineStore('finance', {
       return map
     },
 
-    // status de cada meta definida -> { categoria, limite, gasto, restante, pct, status }
     statusOrcamento () {
       const gasto = this.gastoMesOrcamento
       return Object.entries(this.budgets)
@@ -134,19 +131,11 @@ export const useFinanceStore = defineStore('finance', {
           let status = 'ok'
           if (pct >= 100) status = 'estourou'
           else if (pct >= 80) status = 'alerta'
-          return {
-            categoria,
-            limite: lim,
-            gasto: g,
-            restante: lim - g,
-            pct,
-            status
-          }
+          return { categoria, limite: lim, gasto: g, restante: lim - g, pct, status }
         })
         .sort((a, b) => b.pct - a.pct)
     },
 
-    // totais agregados das metas
     resumoOrcamento () {
       const itens = this.statusOrcamento
       const limiteTotal = itens.reduce((a, i) => a + i.limite, 0)
@@ -164,82 +153,227 @@ export const useFinanceStore = defineStore('finance', {
   },
 
   actions: {
-    persist () {
-      writeJSON(STORAGE_KEY, this.transactions)
+    _uid () {
+      return useAuthStore().user?.id || null
     },
 
-    persistBudgets () {
-      writeJSON(BUDGET_KEY, this.budgets)
-    },
-
-    // define (ou atualiza) a meta mensal de uma categoria; valor 0/null remove
-    setBudget (categoria, limite) {
-      const v = Number(limite)
-      if (!categoria) return
-      if (!v || v <= 0) {
-        delete this.budgets[categoria]
+    _erro (e, contexto) {
+      const toast = useToast()
+      const msg = e?.message || String(e)
+      console.error('[finance]', contexto, e)
+      if (/Could not find the table|schema cache|does not exist/i.test(msg)) {
+        toast.error('Tabelas não encontradas no Supabase. Rode a migration (supabase/migrations).')
+      } else if (/JWT|auth|permission|row-level security|RLS/i.test(msg)) {
+        toast.error('Sem permissão para salvar. Faça login novamente.')
       } else {
-        this.budgets[categoria] = v
+        toast.error('Erro ao salvar no Supabase: ' + msg)
       }
-      this.persistBudgets()
     },
 
-    removeBudget (categoria) {
-      delete this.budgets[categoria]
-      this.persistBudgets()
+    // Carrega receitas, despesas e orcamentos do usuario logado.
+    async loadAll () {
+      if (!this._uid()) return
+      this.loading = true
+      try {
+        const [r, d, o] = await Promise.all([
+          supabase.from('receitas').select('*').order('data', { ascending: false }),
+          supabase.from('despesas').select('*').order('data', { ascending: false }),
+          supabase.from('orcamentos').select('*')
+        ])
+        if (r.error) throw r.error
+        if (d.error) throw d.error
+        if (o.error) throw o.error
+
+        this.transactions = [
+          ...(r.data || []).map((row) => rowToTx(row, 'receita')),
+          ...(d.data || []).map((row) => rowToTx(row, 'despesa'))
+        ]
+        const b = {}
+        for (const row of o.data || []) b[row.categoria] = Number(row.limite_mensal)
+        this.budgets = b
+        this.loaded = true
+      } catch (e) {
+        this._erro(e, 'loadAll')
+      } finally {
+        this.loading = false
+      }
     },
 
-    clearBudgets () {
+    // limpa o estado local (usado no logout)
+    reset () {
+      this.transactions = []
       this.budgets = {}
-      this.persistBudgets()
+      this.loaded = false
+      this.filtroMes = ''
     },
 
-    add (tx) {
-      const t = {
-        id: uid(),
-        data: tx.data,
-        descricao: tx.descricao || 'Transação',
-        valor: Math.abs(Number(tx.valor || 0)),
-        tipo: tx.tipo === 'receita' ? 'receita' : 'despesa',
-        categoria: tx.categoria || autoCategoria(tx.descricao, tx.tipo),
-        origem: tx.origem || 'Manual',
-        externalId: tx.externalId || '',
-        observacao: tx.observacao || '',
-        criadoEm: new Date().toISOString()
+    async add (tx) {
+      const uid = this._uid()
+      if (!uid) return null
+      const tipo = tx.tipo === 'receita' ? 'receita' : 'despesa'
+      try {
+        const { data, error } = await supabase
+          .from(tabela(tipo))
+          .insert(txToRow({ ...tx, tipo }, uid))
+          .select()
+          .single()
+        if (error) throw error
+        const novo = rowToTx(data, tipo)
+        this.transactions.push(novo)
+        return novo
+      } catch (e) {
+        this._erro(e, 'add')
+        return null
       }
-      this.transactions.push(t)
-      this.persist()
-      return t
     },
 
-    addMany (list) {
-      const novos = []
+    async addMany (list) {
+      const uid = this._uid()
+      if (!uid) return []
+      const grupos = { receita: [], despesa: [] }
       for (const tx of list) {
-        novos.push(this.add(tx))
+        const tipo = tx.tipo === 'receita' ? 'receita' : 'despesa'
+        grupos[tipo].push(txToRow({ ...tx, tipo }, uid))
       }
-      return novos
+      const inseridos = []
+      try {
+        for (const tipo of ['receita', 'despesa']) {
+          if (!grupos[tipo].length) continue
+          const { data, error } = await supabase.from(tabela(tipo)).insert(grupos[tipo]).select()
+          if (error) throw error
+          for (const row of data) {
+            const novo = rowToTx(row, tipo)
+            this.transactions.push(novo)
+            inseridos.push(novo)
+          }
+        }
+      } catch (e) {
+        this._erro(e, 'addMany')
+      }
+      return inseridos
     },
 
-    update (id, patch) {
+    async update (id, patch) {
       const i = this.transactions.findIndex((t) => t.id === id)
       if (i === -1) return
       const cur = this.transactions[i]
-      this.transactions[i] = {
-        ...cur,
-        ...patch,
-        valor: patch.valor !== undefined ? Math.abs(Number(patch.valor)) : cur.valor
+      const uid = this._uid()
+      if (!uid) return
+
+      const novoTipo = patch.tipo || cur.tipo
+
+      try {
+        // mudou de tipo => move entre tabelas (delete + insert, novo id)
+        if (novoTipo !== cur.tipo) {
+          const { error: delErr } = await supabase.from(tabela(cur.tipo)).delete().eq('id', id)
+          if (delErr) throw delErr
+          const merged = { ...cur, ...patch, tipo: novoTipo }
+          const { data, error } = await supabase
+            .from(tabela(novoTipo))
+            .insert(txToRow(merged, uid))
+            .select()
+            .single()
+          if (error) throw error
+          this.transactions[i] = rowToTx(data, novoTipo)
+          return true
+        }
+
+        const merged = { ...cur, ...patch }
+        const { data, error } = await supabase
+          .from(tabela(cur.tipo))
+          .update({
+            data: merged.data,
+            descricao: merged.descricao,
+            valor: Math.abs(Number(merged.valor || 0)),
+            categoria: merged.categoria,
+            origem: merged.origem,
+            observacao: merged.observacao || null,
+            external_id: merged.externalId || null
+          })
+          .eq('id', id)
+          .select()
+          .single()
+        if (error) throw error
+        this.transactions[i] = rowToTx(data, cur.tipo)
+        return true
+      } catch (e) {
+        this._erro(e, 'update')
+        return false
       }
-      this.persist()
     },
 
-    remove (id) {
-      this.transactions = this.transactions.filter((t) => t.id !== id)
-      this.persist()
+    async remove (id) {
+      const cur = this.transactions.find((t) => t.id === id)
+      if (!cur) return false
+      try {
+        const { error } = await supabase.from(tabela(cur.tipo)).delete().eq('id', id)
+        if (error) throw error
+        this.transactions = this.transactions.filter((t) => t.id !== id)
+        return true
+      } catch (e) {
+        this._erro(e, 'remove')
+        return false
+      }
     },
 
-    clearAll () {
-      this.transactions = []
-      this.persist()
+    async clearAll () {
+      const uid = this._uid()
+      if (!uid) return false
+      try {
+        const [r, d] = await Promise.all([
+          supabase.from('receitas').delete().eq('user_id', uid),
+          supabase.from('despesas').delete().eq('user_id', uid)
+        ])
+        if (r.error) throw r.error
+        if (d.error) throw d.error
+        this.transactions = []
+        return true
+      } catch (e) {
+        this._erro(e, 'clearAll')
+        return false
+      }
+    },
+
+    // define (ou atualiza) a meta mensal de uma categoria; valor 0/null remove
+    async setBudget (categoria, limite) {
+      const uid = this._uid()
+      if (!uid || !categoria) return
+      const v = Number(limite)
+      try {
+        if (!v || v <= 0) {
+          await this.removeBudget(categoria)
+          return
+        }
+        const { error } = await supabase
+          .from('orcamentos')
+          .upsert({ user_id: uid, categoria, limite_mensal: v }, { onConflict: 'user_id,categoria' })
+        if (error) throw error
+        this.budgets = { ...this.budgets, [categoria]: v }
+        return true
+      } catch (e) {
+        this._erro(e, 'setBudget')
+        return false
+      }
+    },
+
+    async removeBudget (categoria) {
+      const uid = this._uid()
+      if (!uid) return
+      try {
+        const { error } = await supabase
+          .from('orcamentos')
+          .delete()
+          .eq('user_id', uid)
+          .eq('categoria', categoria)
+        if (error) throw error
+        const b = { ...this.budgets }
+        delete b[categoria]
+        this.budgets = b
+        return true
+      } catch (e) {
+        this._erro(e, 'removeBudget')
+        return false
+      }
     },
 
     // Detecta possiveis duplicatas (mesmo externalId, ou mesma data+valor+desc)
@@ -253,13 +387,10 @@ export const useFinanceStore = defineStore('finance', {
       })
     },
 
-    seedDemo () {
+    async seedDemo () {
       if (this.transactions.length) return
       const hoje = new Date()
-      const ym = (offset) => {
-        const d = new Date(hoje.getFullYear(), hoje.getMonth() - offset, 1)
-        return d
-      }
+      const ym = (offset) => new Date(hoje.getFullYear(), hoje.getMonth() - offset, 1)
       const iso = (d, day) => {
         const dd = new Date(d.getFullYear(), d.getMonth(), day)
         const pad = (n) => String(n).padStart(2, '0')
@@ -277,19 +408,11 @@ export const useFinanceStore = defineStore('finance', {
         demo.push({ data: iso(base, 18), descricao: 'Netflix + Spotify', valor: 89, tipo: 'despesa', categoria: 'Assinaturas', origem: 'Fatura de cartão (OFX)' })
         demo.push({ data: iso(base, 20), descricao: 'Farmácia', valor: 150, tipo: 'despesa', categoria: 'Saúde', origem: 'Manual' })
       }
-      this.addMany(demo)
+      await this.addMany(demo)
 
-      // metas de exemplo (algumas propositalmente apertadas p/ demonstrar alertas)
       if (!Object.keys(this.budgets).length) {
-        this.budgets = {
-          Moradia: 2500,
-          Mercado: 900,
-          Alimentação: 300,
-          Transporte: 250,
-          Assinaturas: 100,
-          Saúde: 200
-        }
-        this.persistBudgets()
+        const metas = { Moradia: 2500, Mercado: 900, Alimentação: 300, Transporte: 250, Assinaturas: 100, Saúde: 200 }
+        await Promise.all(Object.entries(metas).map(([cat, v]) => this.setBudget(cat, v)))
       }
     }
   }

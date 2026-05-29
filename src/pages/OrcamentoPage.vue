@@ -125,14 +125,15 @@ function abrirEditor (item = null) {
   editor.value = true
 }
 
-function salvar () {
-  store.setBudget(form.value.categoria, form.value.limite)
+async function salvar () {
+  const ok = await store.setBudget(form.value.categoria, form.value.limite)
+  if (!ok) return
   toast.success('Meta salva')
   editor.value = false
 }
 
-function excluir (item) {
-  store.removeBudget(item.categoria)
-  toast.info(`Meta de ${item.categoria} removida`, { icon: 'delete' })
+async function excluir (item) {
+  const ok = await store.removeBudget(item.categoria)
+  if (ok) toast.info(`Meta de ${item.categoria} removida`, { icon: 'delete' })
 }
 </script>

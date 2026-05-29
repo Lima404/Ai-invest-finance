@@ -46,7 +46,7 @@ export const useAuthStore = defineStore('auth', {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
         this.session = data.session
-        this.user = data.user
+        this.user = data.user ?? data.session?.user ?? null
         return { ok: true }
       } catch (error) {
         return { ok: false, error: traduzErro(error) }

@@ -44,7 +44,7 @@
 
     <template #footer>
       <button class="btn-ghost" @click="$emit('update:open', false)">Cancelar</button>
-      <button class="btn-primary" :disabled="!valido" @click="salvar">{{ editId ? 'Salvar' : 'Adicionar' }}</button>
+      <button class="btn-primary" :disabled="!valido || salvando" @click="salvar">{{ editId ? 'Salvar' : 'Adicionar' }}</button>
     </template>
   </Modal>
 </template>
@@ -108,15 +108,24 @@ watch(() => props.open, (open) => {
   }
 })
 
-function salvar () {
-  if (!valido.value) return
-  if (editId.value) {
-    store.update(editId.value, { ...form.value })
-    toast.success('Lançamento atualizado')
-  } else {
-    store.add({ ...form.value })
-    toast.success('Lançamento adicionado')
+const salvando = ref(false)
+
+async function salvar () {
+  if (!valido.value || salvando.value) return
+  salvando.value = true
+  try {
+    if (editId.value) {
+      const ok = await store.update(editId.value, { ...form.value })
+      if (!ok) return
+      toast.success('Lançamento atualizado')
+    } else {
+      const novo = await store.add({ ...form.value })
+      if (!novo) return
+      toast.success('Lançamento adicionado')
+    }
+    emit('update:open', false)
+  } finally {
+    salvando.value = false
   }
-  emit('update:open', false)
 }
 </script>

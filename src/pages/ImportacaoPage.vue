@@ -243,13 +243,22 @@ function toggleTodos (v) { itensVisiveis.value.forEach((i) => { i._incluir = v }
 function colorFor (n) { return categoryColor(n) }
 function iconFor (n) { return categoryIcon(n) }
 
-function confirmar () {
+async function confirmar () {
   const list = selecionados.value.map((i) => ({
     data: i.data, descricao: i.descricao, valor: i.valor, tipo: i.tipo, categoria: i.categoria, origem: i.origem, externalId: i.externalId
   }))
-  store.addMany(list)
-  historico.value.unshift({ fileName: parsed.value.fileName, origem: parsed.value.origem, count: list.length })
-  toast.success(`${list.length} lançamento(s) importado(s) com sucesso!`)
+  const fileName = parsed.value.fileName
+  const origem = parsed.value.origem
+  loading.show('Salvando lançamentos...')
+  let inseridos = []
+  try {
+    inseridos = await store.addMany(list)
+  } finally {
+    loading.hide()
+  }
+  if (!inseridos.length) return
+  historico.value.unshift({ fileName, origem, count: inseridos.length })
+  toast.success(`${inseridos.length} lançamento(s) importado(s) com sucesso!`)
   reset()
 }
 

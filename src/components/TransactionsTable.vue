@@ -139,8 +139,8 @@ async function excluir (row) {
     danger: true
   })
   if (ok) {
-    store.remove(row.id)
-    toast.info('Lançamento removido', { icon: 'delete' })
+    const removido = await store.remove(row.id)
+    if (removido) toast.info('Lançamento removido', { icon: 'delete' })
   }
 }
 </script>

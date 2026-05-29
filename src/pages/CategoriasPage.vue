@@ -63,8 +63,8 @@ async function limpar () {
     danger: true
   })
   if (ok) {
-    store.clearAll()
-    toast.info('Todos os dados foram apagados', { icon: 'delete_sweep' })
+    const limpou = await store.clearAll()
+    if (limpou) toast.info('Todos os dados foram apagados', { icon: 'delete_sweep' })
   }
 }
 </script>

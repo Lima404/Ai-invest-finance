@@ -81,7 +81,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRouter } from 'vue-router'
 import BrandLogo from '@/components/BrandLogo.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
@@ -104,9 +104,15 @@ async function sair () {
   const ok = await confirm({ title: 'Sair da conta', message: 'Deseja encerrar a sessão?', okLabel: 'Sair' })
   if (!ok) return
   await auth.signOut()
+  store.reset()
   toast.info('Sessão encerrada', { icon: 'logout' })
   router.replace({ name: 'login' })
 }
+
+// Carrega os dados do usuario (Supabase) ao entrar no app
+onMounted(() => {
+  if (auth.isAuthenticated) store.loadAll()
+})
 
 const nav = [
   { to: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
