@@ -16,10 +16,10 @@
         </div>
         <AlertDialogDescription class="mb-5 text-sm text-taupe">{{ state.message }}</AlertDialogDescription>
         <div class="flex justify-end gap-2">
-          <AlertDialogCancel class="btn-ghost" @click="_settle(false)">{{ state.cancelLabel }}</AlertDialogCancel>
-          <AlertDialogAction :class="state.danger ? 'btn-danger' : 'btn-primary'" @click="_settle(true)">
+          <button type="button" class="btn-ghost" @click="_settle(false)">{{ state.cancelLabel }}</button>
+          <button type="button" :class="state.danger ? 'btn-danger' : 'btn-primary'" @click="_settle(true)">
             {{ state.okLabel }}
-          </AlertDialogAction>
+          </button>
         </div>
       </AlertDialogContent>
     </AlertDialogPortal>
@@ -29,7 +29,7 @@
 <script setup>
 import {
   AlertDialogRoot, AlertDialogPortal, AlertDialogOverlay, AlertDialogContent,
-  AlertDialogTitle, AlertDialogDescription, AlertDialogCancel, AlertDialogAction
+  AlertDialogTitle, AlertDialogDescription
 } from 'reka-ui'
 import { useConfirmState, _settle } from '@/composables/useConfirm'
 import AppIcon from './AppIcon.vue'
