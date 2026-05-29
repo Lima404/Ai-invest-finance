@@ -42,6 +42,7 @@ npm run preview  # serve o build de produção
 - **Reka UI** (Radix Vue) — primitivos acessíveis e headless (Dialog, Select, Switch, Progress, ToggleGroup, AlertDialog)
 - **Tailwind CSS v4** — estilização e tokens de tema
 - **Pinia** — estado + persistência em `localStorage`
+- **shadcn-vue + unovis** (`@unovis/vue`) — gráficos (barras e donut) do dashboard
 - **@iconify/vue** (Material Symbols) — ícones
 - **pdfjs-dist** / **papaparse** — parsing de PDF e CSV
 
@@ -62,11 +63,11 @@ src/
 │   │   ├── ConfirmDialog.vue  # AlertDialog (host global)
 │   │   ├── ToastContainer.vue # toasts (host global)
 │   │   ├── LoadingOverlay.vue # overlay de loading
-│   │   └── AppIcon.vue        # ícones (Iconify / Material Symbols)
+│   │   ├── AppIcon.vue        # ícones (Iconify / Material Symbols)
+│   │   ├── chart-bar/BarChart.vue    # gráfico de barras (shadcn-vue + unovis)
+│   │   └── chart-donut/DonutChart.vue # rosca (shadcn-vue + unovis)
 │   ├── BrandLogo.vue          # logo "AI Invest" em SVG
 │   ├── KpiCard.vue            # cartão de indicador
-│   ├── BarChart.vue           # gráfico de barras (evolução mensal)
-│   ├── DonutChart.vue         # rosca (despesas por categoria)
 │   ├── TransactionsTable.vue  # tabela de lançamentos (busca/sort/paginação)
 │   └── TransactionDialog.vue  # criar/editar lançamento manual
 ├── layouts/MainLayout.vue     # sidebar + header + filtro de período

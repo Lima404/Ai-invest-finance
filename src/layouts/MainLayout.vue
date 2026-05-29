@@ -34,6 +34,17 @@
         <button class="btn-ghost w-full" @click="store.seedDemo()">
           <AppIcon name="science" :size="18" /> Dados de exemplo
         </button>
+
+        <!-- Usuario + logout -->
+        <div v-if="auth.isAuthenticated" class="flex items-center gap-2 rounded-xl border border-line p-2">
+          <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-lime/15 text-xs font-bold text-lime">
+            {{ auth.initials }}
+          </div>
+          <span class="min-w-0 flex-1 truncate text-xs text-taupe" :title="auth.email">{{ auth.email }}</span>
+          <button class="btn-icon h-8 w-8" title="Sair" @click="sair">
+            <AppIcon name="logout" :size="18" />
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -71,17 +82,31 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterLink, RouterView, useRouter } from 'vue-router'
 import BrandLogo from '@/components/BrandLogo.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import Select from '@/components/ui/Select.vue'
 import TransactionDialog from '@/components/TransactionDialog.vue'
 import { useFinanceStore } from '@/stores/finance'
+import { useAuthStore } from '@/stores/auth'
 import { formatBRL, formatMonthLabel } from '@/utils/format'
+import { useToast } from '@/composables/useToast'
+import { confirm } from '@/composables/useConfirm'
 
 const store = useFinanceStore()
+const auth = useAuthStore()
+const router = useRouter()
+const toast = useToast()
 const drawer = ref(false)
 const dialog = ref(false)
+
+async function sair () {
+  const ok = await confirm({ title: 'Sair da conta', message: 'Deseja encerrar a sessão?', okLabel: 'Sair' })
+  if (!ok) return
+  await auth.signOut()
+  toast.info('Sessão encerrada', { icon: 'logout' })
+  router.replace({ name: 'login' })
+}
 
 const nav = [
   { to: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
